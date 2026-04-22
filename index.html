@@ -1,0 +1,307 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>反応速度マスター Pro</title>
+    <style>
+        :root {
+            --bg-dark: #1a1a2e;
+            --card-bg: #16213e;
+            --accent: #0f3460;
+            --text: #e94560;
+            --success: #2ecc71;
+            --warning: #f1c40f;
+            --danger: #e74c3c;
+        }
+
+        body {
+            font-family: 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;
+            background-color: var(--bg-dark);
+            color: white;
+            display: flex;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            overflow: hidden;
+        }
+
+        #game-card {
+            background-color: var(--card-bg);
+            padding: 30px;
+            border-radius: 20px;
+            box-shadow: 0 0 30px rgba(0,0,0,0.5);
+            text-align: center;
+            width: 400px;
+            border: 2px solid var(--accent);
+        }
+
+        .stats-grid {
+            display: grid;
+            grid-template-columns: 1fr 1fr;
+            gap: 10px;
+            margin-bottom: 20px;
+            font-size: 0.9rem;
+        }
+
+        .stat-box {
+            background: var(--accent);
+            padding: 10px;
+            border-radius: 10px;
+        }
+
+        #display-area {
+            width: 100%;
+            height: 250px;
+            margin: 20px 0;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            border-radius: 15px;
+            background-color: #333;
+            cursor: pointer;
+            transition: all 0.2s cubic-bezier(0.175, 0.885, 0.32, 1.275);
+            user-select: none;
+            position: relative;
+        }
+
+        /* GO時のアニメーション */
+        .go-active {
+            transform: scale(1.05);
+            box-shadow: 0 0 40px var(--success);
+        }
+
+        .status-text {
+            font-size: 2.5rem;
+            font-weight: 900;
+            text-shadow: 2px 2px 4px rgba(0,0,0,0.3);
+        }
+
+        .controls {
+            margin-bottom: 20px;
+        }
+
+        select, button {
+            padding: 12px 20px;
+            font-size: 1rem;
+            border-radius: 8px;
+            border: none;
+            cursor: pointer;
+            font-weight: bold;
+        }
+
+        select {
+            background: #fff;
+            margin-right: 10px;
+        }
+
+        #start-btn {
+            background-color: var(--text);
+            color: white;
+            min-width: 120px;
+        }
+
+            #start-btn:hover {
+                filter: brightness(1.2);
+            }
+
+        .history {
+            height: 100px;
+            overflow-y: auto;
+            background: rgba(0,0,0,0.2);
+            border-radius: 8px;
+            padding: 10px;
+            margin-top: 15px;
+            font-family: monospace;
+        }
+
+        .comment {
+            font-weight: bold;
+            margin-top: 10px;
+            min-height: 1.5em;
+        }
+
+        .gold {
+            color: #f1c40f;
+        }
+
+        .silver {
+            color: #bdc3c7;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-card">
+        <h1 style="color: var(--text); margin-top: 0;">REACTION TEST</h1>
+
+        <div class="stats-grid">
+            <div class="stat-box">BEST: <span id="best-score">--</span>ms</div>
+            <div class="stat-box">FOULS: <span id="foul-count">0</span></div>
+        </div>
+
+        <div class="controls">
+            <select id="difficulty">
+                <option value="easy">Easy (2-4s)</option>
+                <option value="normal" selected>Normal (1-3s)</option>
+                <option value="hard">Hard (0.5-2s)</option>
+            </select>
+            <button id="start-btn">GAME START</button>
+        </div>
+
+        <div id="display-area">
+            <span id="message" class="status-text">READY?</span>
+        </div>
+
+        <div id="comment" class="comment"></div>
+        <div id="history-list" class="history"></div>
+        <div id="avg-result" style="margin-top:10px; font-weight:bold;"></div>
+    </div>
+
+    <script>
+        const displayArea = document.getElementById('display-area');
+        const message = document.getElementById('message');
+        const startBtn = document.getElementById('start-btn');
+        const difficultySelect = document.getElementById('difficulty');
+        const historyList = document.getElementById('history-list');
+        const avgResult = document.getElementById('avg-result');
+        const bestDisplay = document.getElementById('best-score');
+        const foulDisplay = document.getElementById('foul-count');
+        const commentDisplay = document.getElementById('comment');
+
+        let state = 'WAITING';
+        let startTime, timeoutId;
+        let scores = [];
+        let foulCount = 0;
+        let personalBest = localStorage.getItem('bestReactionTime') || Infinity;
+
+        // 初期化
+        if (personalBest !== Infinity) {
+            bestDisplay.textContent = personalBest;
+        }
+
+        const DIFF_SETTINGS = {
+            easy: { min: 2000, max: 4000 },
+            normal: { min: 1000, max: 3000 },
+            hard: { min: 500, max: 2000 }
+        };
+
+        function getComment(ms) {
+            if (ms <= 200) return { text: "神！(GOD SPEED)", class: "gold" };
+            if (ms <= 300) return { text: "速い！(GREAT)", class: "silver" };
+            return { text: "普通 (AVERAGE)", class: "" };
+        }
+
+        function resetGame() {
+            scores = [];
+            foulCount = 0;
+            foulDisplay.textContent = '0';
+            historyList.innerHTML = '';
+            avgResult.textContent = '';
+            commentDisplay.textContent = '';
+            nextRound();
+        }
+
+        function nextRound() {
+            state = 'READY';
+            startBtn.disabled = true;
+            difficultySelect.disabled = true;
+            message.textContent = 'WAIT...';
+            displayArea.style.backgroundColor = '#e67e22';
+            displayArea.classList.remove('go-active');
+
+            const diff = DIFF_SETTINGS[difficultySelect.value];
+            const delay = Math.floor(Math.random() * (diff.max - diff.min)) + diff.min;
+
+            timeoutId = setTimeout(() => {
+                state = 'GO';
+                message.textContent = 'GO!!';
+                displayArea.style.backgroundColor = '#2ecc71';
+                displayArea.classList.add('go-active');
+                startTime = performance.now();
+            }, delay);
+        }
+
+        displayArea.addEventListener('mousedown', (e) => {
+            if (state === 'READY') {
+                handleFoul();
+            } else if (state === 'GO') {
+                handleSuccess();
+            }
+        });
+
+        function handleFoul() {
+            clearTimeout(timeoutId);
+            foulCount++;
+            foulDisplay.textContent = foulCount;
+            state = 'RESULT';
+            message.textContent = 'FOUL!!';
+            displayArea.style.backgroundColor = '#e74c3c';
+            displayArea.classList.remove('go-active');
+            processEndOfRound(null);
+        }
+
+        function handleSuccess() {
+            const reactionTime = Math.floor(performance.now() - startTime);
+            state = 'RESULT';
+            message.textContent = `${reactionTime}ms`;
+            displayArea.style.backgroundColor = '#eee';
+            displayArea.classList.remove('go-active');
+
+            // ベストスコア更新
+            if (reactionTime < personalBest) {
+                personalBest = reactionTime;
+                localStorage.setItem('bestReactionTime', personalBest);
+                bestDisplay.textContent = personalBest;
+                bestDisplay.classList.add('gold');
+            }
+
+            processEndOfRound(reactionTime);
+        }
+
+        function processEndOfRound(time) {
+            const roundNum = scores.length + 1;
+            const log = document.createElement('div');
+
+            if (time !== null) {
+                scores.push(time);
+                const res = getComment(time);
+                log.innerHTML = `Round ${roundNum}: <b>${time}ms</b>`;
+                commentDisplay.textContent = res.text;
+                commentDisplay.className = `comment ${res.class}`;
+            } else {
+                scores.push(null);
+                log.innerHTML = `Round ${roundNum}: <span style="color:var(--danger)">FOUL</span>`;
+            }
+
+            historyList.prepend(log);
+
+            if (scores.length < 3) {
+                setTimeout(nextRound, 1500);
+            } else {
+                finishGame();
+            }
+        }
+
+        function finishGame() {
+            state = 'WAITING';
+            startBtn.disabled = false;
+            difficultySelect.disabled = false;
+            startBtn.textContent = 'RETRY';
+
+            const validScores = scores.filter(s => s !== null);
+            if (validScores.length > 0) {
+                const avg = Math.floor(validScores.reduce((a, b) => a + b) / validScores.length);
+                avgResult.innerHTML = `3回平均: <span style="font-size:1.5rem">${avg}ms</span>`;
+            } else {
+                avgResult.textContent = '有効な記録なし';
+            }
+        }
+
+        startBtn.addEventListener('click', resetGame);
+    </script>
+
+</body>
+</html>
